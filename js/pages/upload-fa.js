@@ -66,9 +66,9 @@ const UploadFaPage = {
       Loading.hide();
 
       Loading.show(`Memparsing anggaran BMB/BDC/BDB menggunakan ${settings.ai_model}...`);
-      const rows = await AiCaller.parseFaDetail(fullText, settings, (batch, total) => {
+      const rows = await AiCaller.parseFaDetail(fullText, settings, (batch, total, outputKode) => {
         const textEl = document.getElementById('db-loading-text');
-        if (textEl) textEl.textContent = `Memparsing bagian ${batch}/${total} menggunakan ${settings.ai_model}...`;
+        if (textEl) textEl.textContent = `Memparsing bagian ${batch}/${total} (${outputKode || 'FA'}) menggunakan ${settings.ai_model}...`;
       });
       Loading.hide();
 
@@ -92,9 +92,14 @@ const UploadFaPage = {
           <h3 class="text-base font-bold text-slate-900">Preview Hasil Parsing AI (${this.parsedRows.length} baris)</h3>
           <p class="text-xs text-slate-500">Periksa kembali sebelum menyimpan ke database Google Sheets (data lama akan diperbarui).</p>
         </div>
-        <button onclick="UploadFaPage.saveToDb()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold shadow-sm">
-          💾 Simpan ke Database
-        </button>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="UploadFaPage.exportPreviewExcel()" class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-semibold shadow-sm">
+            📥 Export Excel (.xlsx)
+          </button>
+          <button onclick="UploadFaPage.saveToDb()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold shadow-sm">
+            💾 Simpan ke Database
+          </button>
+        </div>
       </div>
       <div class="overflow-x-auto max-h-[60vh]">
         <table class="w-full text-xs text-left">
@@ -141,5 +146,27 @@ const UploadFaPage = {
     } catch (err) {
       Toast.error(err.message);
     }
+  },
+
+  exportPreviewExcel() {
+    if (!this.parsedRows.length) return;
+    const periode = document.getElementById('fa-periode').value || new Date().toISOString().slice(0, 10);
+    const rows = this.parsedRows.map(r => ({
+      Output: r.output_kode,
+      MAK: r.mak_full,
+      SubOutput: r.output,
+      Komponen: r.komponen,
+      SubKomponen: r.subkomponen,
+      Kode_Akun: r.akun_kode,
+      Nama_Akun: r.akun_nama,
+      No_Item: r.item_no,
+      Nama_Item: r.item_nama,
+      Pagu: Number(r.pagu) || 0,
+      Realisasi_Lalu: Number(r.realisasi_lalu) || 0,
+      Realisasi_Ini: Number(r.realisasi_ini) || 0,
+      Realisasi_Total: Number(r.realisasi_total) || 0,
+      Sisa: Number(r.sisa) || 0
+    }));
+    ExcelExport.exportWorkbook([{ name: 'FA_Detail_Parsed', rows }], `FA_Detail_BMB_BDC_BDB_${periode}.xlsx`);
   }
 };

@@ -18,11 +18,16 @@ const TicketListPage = {
             <h2 class="text-2xl font-bold text-slate-900">Daftar Ticket Pengadaan</h2>
             <p class="text-sm text-slate-500">Pantau status usulan, kelengkapan dokumen, proses PBJ, hingga SP2D</p>
           </div>
-          ${Auth.hasRole(['user', 'admin']) ? `
-            <button onclick="App.navigate('ticket-new')" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm">
-              + Buat Usulan Pengadaan
+          <div class="flex flex-wrap gap-2">
+            <button onclick="TicketListPage.exportExcel()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-sm">
+              📥 Export Excel (.xlsx)
             </button>
-          ` : ''}
+            ${Auth.hasRole(['user', 'admin']) ? `
+              <button onclick="App.navigate('ticket-new')" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm">
+                + Buat Usulan Pengadaan
+              </button>
+            ` : ''}
+          </div>
         </div>
 
         <!-- Filter Bar -->
@@ -165,5 +170,54 @@ const TicketListPage = {
         </table>
       </div>
     `;
+  },
+
+  exportExcel() {
+    if (!this.tickets || !this.tickets.length) {
+      Toast.warning('Belum ada data ticket untuk diexport.');
+      return;
+    }
+
+    const ticketRows = this.tickets.map(t => ({
+      Ticket_ID: t.id,
+      Tanggal_Buat: t.created_at ? String(t.created_at).slice(0, 10) : '',
+      Stage: CONFIG.STAGES[t.stage]?.label || t.stage,
+      SubStatus_PBJ: CONFIG.SUBSTATUS_STAGE3.find(s => s.kode === t.substatus)?.label || t.substatus || '',
+      Nomor_Nodin: t.nodin_nomor || '',
+      Tanggal_Nodin: t.nodin_tanggal || '',
+      Perihal: t.perihal || '',
+      Pemohon: t.pemohon_nama || '',
+      Unit: t.pemohon_unit || '',
+      Vendor: t.vendor || '',
+      Total_Estimasi: Number(t.total_estimasi) || 0,
+      Total_Final: Number(t.total_final) || 0,
+      Nilai_SP2D: Number(t.nilai_sp2d) || 0,
+      Nomor_SP2D: t.nomor_sp2d || '',
+      Tanggal_SP2D: t.tanggal_sp2d || ''
+    }));
+
+    const itemRows = [];
+    this.tickets.forEach(t => {
+      (t.items || []).forEach(it => {
+        itemRows.push({
+          Ticket_ID: t.id,
+          Stage: CONFIG.STAGES[t.stage]?.label || t.stage,
+          Output: it.output_kode || '',
+          MAK: it.mak_full || '',
+          Nama_Barang: it.nama_barang || '',
+          Spesifikasi: it.spesifikasi || '',
+          Jumlah: Number(it.jumlah) || 0,
+          Satuan: it.satuan || '',
+          Estimasi_Harga: Number(it.estimasi_harga) || 0,
+          Harga_Final: Number(it.harga_final) || 0
+        });
+      });
+    });
+
+    const tgl = new Date().toISOString().slice(0, 10);
+    ExcelExport.exportWorkbook([
+      { name: 'Daftar_Ticket', rows: ticketRows },
+      { name: 'Rincian_Item_Pesanan', rows: itemRows }
+    ], `Daftar_Pengadaan_${tgl}.xlsx`);
   }
 };

@@ -113,49 +113,123 @@ const AiCaller = {
   },
 
   /**
-   * Ambil hanya halaman-halaman yang berada di bawah output BMB, BDC, atau BDB
+   * Bersihkan header & footer berulang di setiap halaman PDF FA Detail SAKTI
+   * sehingga menjadi satu tabel hierarkis yang menyambung utuh.
    */
-  filterTargetPages(fullText) {
-    const pages = String(fullText || '').split(/--- HALAMAN \d+ ---/);
-    const selected = [];
-    let currentOutput = '';
-    let currentSubOutput = '';
+  cleanFaText(fullText) {
+    return String(fullText || '')
+      .replace(/--- HALAMAN \d+ ---/g, '\n')
+      .replace(/\*Lock Pagu adalah jumlah pagu yang sedang dalam proses usulan revisi DIPA atau POK\.[\s\S]*?selesai menjadi DIPA\./g, '')
+      .replace(/Periode\s+\w+\s+\d{4}\s+Satuan Kerja\s*:[\s\S]*?Pagu Revisi/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  },
 
-    for (let i = 0; i < pages.length; i++) {
-      const p = pages[i].trim();
-      if (!p) continue;
+  /**
+   * Potong teks bersih menjadi section per Output (BDB, BDC, BMB) secara utuh
+   * dari kemunculan kode Output hingga Output berikutnya.
+   */
+  extractTargetSections(fullText) {
+    const clean = this.cleanFaText(fullText);
+    const targets = ['BDB', 'BDC', 'BMB'];
+    const sections = [];
 
-      const startOutput = currentOutput;
-      const startSubOutput = currentSubOutput;
+    // Cari semua posisi SubOutput seperti "BDB.001", "BDC.001", "BMB.001", "BIA.001", "CAB.001", dll.
+    const subRegex = /\b([A-Z]{3})\.\d{3}\b/g;
+    const markers = [];
+    let match;
+    while ((match = subRegex.exec(clean)) !== null) {
+      markers.push({ code: match[1], sub: match[0], index: match.index });
+    }
 
-      // Cari semua kode SubOutput seperti "BDB.001", "BDC.001", "BMB.001", "BIA.001", "AEA.001"
-      const subOutputMatches = p.match(/\b([A-Z]{3})\.\d{3}\b/g) || [];
-      let pageHasTarget = ['BMB', 'BDC', 'BDB'].includes(startOutput);
+    if (markers.length === 0) {
+      return [{ outputKode: '', text: clean.slice(0, 10000) }];
+    }
 
-      for (const m of subOutputMatches) {
-        const code = m.slice(0, 3);
-        currentOutput = code;
-        currentSubOutput = m;
-        if (['BMB', 'BDC', 'BDB'].includes(code)) {
-          pageHasTarget = true;
+    // Kelompokkan marker berurutan yang memiliki output code yang sama
+    let i = 0;
+    while (i < markers.length) {
+      const code = markers[i].code;
+      // Cari awal baris Output (mundur sedikit untuk menangkap nama Output mis. "BMB Komunikasi Publik ...")
+      const rawStart = Math.max(0, markers[i].index - 180);
+      const outputIdx = clean.lastIndexOf(code + ' ', markers[i].index);
+      const startIdx = (outputIdx !== -1 && outputIdx >= rawStart) ? outputIdx : markers[i].index;
+
+      // Cari akhir section: posisi marker pertama yang code-nya berbeda
+      let j = i + 1;
+      while (j < markers.length && markers[j].code === code) {
+        j++;
+      }
+
+      let endIdx = clean.length;
+      if (j < markers.length) {
+        // Mundur sebelum nama Output berikutnya (cari "<NEXT_CODE> " sebelum marker j)
+        const nextCode = markers[j].code;
+        const nextOutIdx = clean.lastIndexOf(nextCode + ' ', markers[j].index);
+        endIdx = (nextOutIdx !== -1 && nextOutIdx > startIdx) ? nextOutIdx : markers[j].index;
+      }
+
+      if (targets.includes(code)) {
+        sections.push({
+          outputKode: code,
+          text: clean.slice(startIdx, endIdx).trim()
+        });
+      }
+
+      i = j;
+    }
+
+    return sections;
+  },
+
+  /**
+   * Pecah section yang panjang (mis. BDB ~18rb char) menjadi chunk ~5.500 char
+   * pada batas akun (52xxxx) sambil menyisipkan konteks header hierarki.
+   */
+  splitSectionIntoChunks(section) {
+    const MAX_LEN = 5500;
+    const text = section.text;
+    if (text.length <= MAX_LEN) {
+      return [text];
+    }
+
+    const chunks = [];
+    let pos = 0;
+    let activeKomponen = '';
+    let activeSubkomponen = '';
+
+    while (pos < text.length) {
+      let end = Math.min(pos + MAX_LEN, text.length);
+      if (end < text.length) {
+        // Cari batas akun 6 digit (mis. " 521211 " atau " 524111 ") sebelum end agar tidak memotong di tengah baris item
+        const sliceForBreak = text.slice(pos, end);
+        const akunMatches = [...sliceForBreak.matchAll(/\s(5[1-3]\d{4})\s/g)];
+        if (akunMatches.length > 0) {
+          const lastMatch = akunMatches[akunMatches.length - 1];
+          if (lastMatch.index > 1000) {
+            end = pos + lastMatch.index;
+          }
         }
       }
 
-      if (!pageHasTarget && /\b(BMB|BDC|BDB)\b/.test(p)) {
-        const m = p.match(/\b(BMB|BDC|BDB)\b/);
-        if (m) currentOutput = m[1];
-        pageHasTarget = true;
+      const chunkBody = text.slice(pos, end).trim();
+      const prefix = pos > 0
+        ? `[LANJUTAN OUTPUT ${section.outputKode}${activeKomponen ? ' | Komponen: ' + activeKomponen : ''}${activeSubkomponen ? ' | SubKomponen: ' + activeSubkomponen : ''}]\n`
+        : '';
+
+      chunks.push(prefix + chunkBody);
+
+      // Update konteks komponen/subkomponen terakhir di chunk ini untuk chunk berikutnya
+      const subKompMatches = [...chunkBody.matchAll(/\b(\d{3}\.[0-9A-Z]{2})\b/g)];
+      if (subKompMatches.length > 0) {
+        activeSubkomponen = subKompMatches[subKompMatches.length - 1][1];
+        activeKomponen = activeSubkomponen.slice(0, 3);
       }
 
-      if (pageHasTarget) {
-        const contextHeader = ['BMB', 'BDC', 'BDB'].includes(startOutput)
-          ? `[KONTEKS HALAMAN: Baris-baris awal sebelum kode output baru merupakan lanjutan dari Output ${startOutput}${startSubOutput ? ' (' + startSubOutput + ')' : ''}.]\n`
-          : '';
-        selected.push({ pageText: contextHeader + p, lastOutput: currentOutput });
-      }
+      pos = end;
     }
 
-    return selected;
+    return chunks;
   },
 
   async parseFaDetail(rawText, settings, onProgress = null) {
@@ -164,29 +238,36 @@ const AiCaller = {
       throw new Error('Pengaturan AI (Endpoint, Model, API Key) belum lengkap. Atur di menu Pengaturan AI & Drive.');
     }
 
-    const targetPages = this.filterTargetPages(rawText);
-    const pagesToProcess = targetPages.length > 0
-      ? targetPages
-      : [{ pageText: rawText.slice(0, 12000), lastOutput: '' }];
+    const sections = this.extractTargetSections(rawText);
+    const allChunks = [];
+    sections.forEach(sec => {
+      const chunks = this.splitSectionIntoChunks(sec);
+      chunks.forEach(c => allChunks.push({ outputKode: sec.outputKode, text: c }));
+    });
 
-    // Proses per 1 halaman agar cepat dan tidak terkena timeout 100 detik (HTTP 524) dari Cloudflare Tunnel
-    const BATCH_SIZE = 1;
+    if (allChunks.length === 0) {
+      throw new Error('Tidak ditemukan bagian BMB, BDC, atau BDB di dalam PDF ini.');
+    }
+
     const allRows = [];
-    const totalBatches = Math.ceil(pagesToProcess.length / BATCH_SIZE);
+    const totalBatches = allChunks.length;
 
     for (let b = 0; b < totalBatches; b++) {
-      if (onProgress) onProgress(b + 1, totalBatches);
-      const slice = pagesToProcess.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
-      const chunkText = slice.map(s => s.pageText).join('\n\n');
+      if (onProgress) onProgress(b + 1, totalBatches, allChunks[b].outputKode);
+      const chunk = allChunks[b];
 
-      const prompt = `Ekstrak data anggaran FA Detail SAKTI berikut HANYA untuk output kode BMB, BDC, atau BDB (abaikan kode output lain).
-Jika halaman ini lanjutan dari output BMB/BDC/BDB, tetap ekstrak.
+      const prompt = `Ekstrak semua baris item/akun dari potongan Laporan FA Detail SAKTI berikut.
+Seluruh teks di bawah ini adalah bagian dari Output ${chunk.outputKode || 'BMB/BDC/BDB'}.
+Gunakan hierarki: Program 3165 -> Output (${chunk.outputKode}) -> SubOutput (mis. ${chunk.outputKode}.001) -> Komponen (mis. 051/052) -> SubKomponen (mis. 051.0A -> kode huruf A/B/C) -> Akun (6 digit, mis. 521211) -> Item (6 digit, mis. 000258).
+Format mak_full contoh: "3165.${chunk.outputKode}.001.051.A.521211" (ambil huruf akhir subkomponen mis. 051.0A menjadi 051.A).
+
 Kembalikan HANYA JSON array murni (tanpa teks lain):
-[{"mak_full":"3165.BDB.001.052.C.521211","output_kode":"BDB","output":"BDB.001","komponen":"052","subkomponen":"052.C","akun_kode":"521211","akun_nama":"Belanja Bahan","item_no":"000039","item_nama":"Spanduk","pagu":175000,"realisasi_lalu":0,"realisasi_ini":0,"realisasi_total":0,"sisa":175000}]
-Jika tidak ada item BMB/BDC/BDB, kembalikan [].
+[{"mak_full":"3165.${chunk.outputKode}.001.051.A.521211","output_kode":"${chunk.outputKode}","output":"${chunk.outputKode}.001","komponen":"051","subkomponen":"051.A","akun_kode":"521211","akun_nama":"Belanja Bahan","item_no":"000258","item_nama":"Pembuatan Baliho, Spanduk dan Banner","pagu":4906000,"realisasi_lalu":4185000,"realisasi_ini":0,"realisasi_total":4185000,"sisa":721000}]
+
+Pastikan semua angka berupa number murni tanpa pemisah ribuan.
 
 Teks:
-${chunkText}`;
+${chunk.text}`;
 
       let content = '';
       for (let attempt = 1; attempt <= 2; attempt++) {
@@ -208,7 +289,10 @@ ${chunkText}`;
       }
 
       const parsed = this.extractJsonArray(content);
-      const valid = parsed.filter(r => ['BMB', 'BDC', 'BDB'].includes(String(r.output_kode || '').toUpperCase()));
+      const valid = parsed.map(r => {
+        if (!r.output_kode && chunk.outputKode) r.output_kode = chunk.outputKode;
+        return r;
+      }).filter(r => ['BMB', 'BDC', 'BDB'].includes(String(r.output_kode || '').toUpperCase()));
       allRows.push(...valid);
     }
 

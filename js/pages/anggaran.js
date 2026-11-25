@@ -14,11 +14,16 @@ const AnggaranPage = {
             <h2 class="text-2xl font-bold text-slate-900">Kondisi Anggaran & MAK</h2>
             <p class="text-sm text-slate-500">Data Pagu, Realisasi, Sisa & Proyeksi Pesanan Aktif (Khusus Output BMB, BDC, BDB)</p>
           </div>
-          ${Auth.hasRole('admin') ? `
-            <button onclick="App.navigate('upload-fa')" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm">
-              📤 Upload FA Detail Baru
+          <div class="flex flex-wrap gap-2">
+            <button onclick="AnggaranPage.exportExcel()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-sm">
+              📥 Export Excel (.xlsx)
             </button>
-          ` : ''}
+            ${Auth.hasRole('admin') ? `
+              <button onclick="App.navigate('upload-fa')" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm">
+                📤 Upload FA Detail Baru
+              </button>
+            ` : ''}
+          </div>
         </div>
 
         <div class="flex gap-1 bg-white p-1.5 rounded-xl border border-slate-200 w-fit">
@@ -174,5 +179,53 @@ const AnggaranPage = {
         </div>
       </div>
     `);
+  },
+
+  async exportExcel() {
+    if (!this.insight) {
+      Toast.warning('Data anggaran belum dimuat.');
+      return;
+    }
+    try {
+      const detailRes = await API.get('get_fa_detail', {}, 'Menghubungkan ke database...');
+      const detailRows = (detailRes.rows || []).map(r => ({
+        Output: r.output_kode,
+        MAK: r.mak_full,
+        SubOutput: r.output,
+        Komponen: r.komponen,
+        SubKomponen: r.subkomponen,
+        Kode_Akun: r.akun_kode,
+        Nama_Akun: r.akun_nama,
+        No_Item: r.item_no,
+        Nama_Item: r.item_nama,
+        Pagu: Number(r.pagu) || 0,
+        Realisasi_Lalu: Number(r.realisasi_lalu) || 0,
+        Realisasi_Ini: Number(r.realisasi_ini) || 0,
+        Realisasi_Total: Number(r.realisasi_total) || 0,
+        Sisa: Number(r.sisa) || 0,
+        Persen: Number(r.persen) || 0
+      }));
+
+      const summaryRows = (this.insight.proyeksi_per_mak || []).map(m => ({
+        Output: m.output_kode,
+        MAK: m.mak_full,
+        Nama_Akun: m.akun_nama,
+        Pagu: m.pagu,
+        Realisasi_Saat_Ini: m.realisasi_sekarang,
+        Sisa_Saat_Ini: m.sisa_sekarang,
+        Komitmen_Pesanan_Aktif: m.komitmen_aktif,
+        Proyeksi_Realisasi: m.proyeksi_realisasi,
+        Proyeksi_Sisa: m.proyeksi_sisa,
+        Proyeksi_Persen: m.proyeksi_persen
+      }));
+
+      const tgl = new Date().toISOString().slice(0, 10);
+      ExcelExport.exportWorkbook([
+        { name: 'Ringkasan_Proyeksi_MAK', rows: summaryRows },
+        { name: 'Detail_FA_BMB_BDC_BDB', rows: detailRows }
+      ], `Anggaran_Infokom_${tgl}.xlsx`);
+    } catch (err) {
+      Toast.error('Gagal export Excel: ' + err.message);
+    }
   }
 };
