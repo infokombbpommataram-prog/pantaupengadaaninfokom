@@ -96,16 +96,89 @@ const AiCaller = {
     return reply || 'OK';
   },
 
-  async parseFaDetail(rawText, settings) {
+  extractJsonArray(text) {
+    const cleaned = String(text || '')
+      .replace(/```json\s*/gi, '')
+      .replace(/```\s*/g, '')
+      .trim();
+
+    const start = cleaned.indexOf('[');
+    const end = cleaned.lastIndexOf(']');
+    if (start === -1 || end === -1 || end < start) {
+      return [];
+    }
+    const jsonSlice = cleaned.slice(start, end + 1);
+    const parsed = JSON.parse(jsonSlice);
+    return Array.isArray(parsed) ? parsed : [];
+  },
+
+  /**
+   * Ambil hanya halaman-halaman yang berada di bawah output BMB, BDC, atau BDB
+   */
+  filterTargetPages(fullText) {
+    const pages = String(fullText || '').split(/--- HALAMAN \d+ ---/);
+    const selected = [];
+    let currentOutput = '';
+
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i].trim();
+      if (!p) continue;
+
+      // Cari semua kode SubOutput seperti "BDB.001", "BDC.001", "BMB.001", "BKB.001", "AEA.001"
+      const subOutputMatches = p.match(/\b([A-Z]{3})\.\d{3}\b/g) || [];
+      let pageHasTarget = false;
+
+      if (['BMB', 'BDC', 'BDB'].includes(currentOutput)) {
+        pageHasTarget = true;
+      }
+
+      for (const m of subOutputMatches) {
+        const code = m.slice(0, 3);
+        currentOutput = code;
+        if (['BMB', 'BDC', 'BDB'].includes(code)) {
+          pageHasTarget = true;
+        }
+      }
+
+      // Fallback jika hanya ada kode 3 huruf berdiri sendiri
+      if (!pageHasTarget && /\b(BMB|BDC|BDB)\b/.test(p)) {
+        pageHasTarget = true;
+      }
+
+      if (pageHasTarget) {
+        selected.push({ pageText: p, lastOutput: currentOutput });
+      }
+    }
+
+    return selected;
+  },
+
+  async parseFaDetail(rawText, settings, onProgress = null) {
     const { ai_endpoint, ai_model, ai_api_key } = settings;
     if (!ai_endpoint || !ai_model || !ai_api_key) {
       throw new Error('Pengaturan AI (Endpoint, Model, API Key) belum lengkap. Atur di menu Pengaturan AI & Drive.');
     }
 
-    const prompt = `Kamu adalah parser laporan keuangan pemerintah Indonesia (FA Detail SAKTI).
-Dari teks laporan berikut, ekstrak HANYA baris item/akun yang berada di bawah output dengan kode BMB, BDC, atau BDB. Abaikan output lain (seperti AEA, BAH, dll).
+    const targetPages = this.filterTargetPages(rawText);
+    const pagesToProcess = targetPages.length > 0
+      ? targetPages
+      : [{ pageText: rawText.slice(0, 12000), lastOutput: '' }];
 
-Kembalikan HANYA JSON array valid tanpa markdown atau teks tambahan, dengan format setiap objek:
+    // Proses per 2 halaman agar tidak melebihi batas token input/output AI
+    const BATCH_SIZE = 2;
+    const allRows = [];
+    const totalBatches = Math.ceil(pagesToProcess.length / BATCH_SIZE);
+
+    for (let b = 0; b < totalBatches; b++) {
+      if (onProgress) onProgress(b + 1, totalBatches);
+      const slice = pagesToProcess.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
+      const chunkText = slice.map(s => s.pageText).join('\n\n');
+
+      const prompt = `Kamu adalah parser laporan keuangan pemerintah Indonesia (FA Detail SAKTI).
+Dari teks laporan berikut, ekstrak HANYA baris item/akun yang berada di bawah output dengan kode BMB, BDC, atau BDB. Abaikan output lain (seperti AEA, BAH, BKB, dll).
+Jika pada halaman ini ada item yang merupakan lanjutan dari output BMB/BDC/BDB di halaman sebelumnya, tetap ekstrak dengan output_kode yang sesuai.
+
+Kembalikan HANYA JSON array valid tanpa teks penjelasan apapun, dengan format setiap objek:
 {
   "mak_full": "3165.BDB.001.052.C.521211",
   "output_kode": "BDB",
@@ -123,33 +196,28 @@ Kembalikan HANYA JSON array valid tanpa markdown atau teks tambahan, dengan form
   "sisa": 175000
 }
 
-Pastikan semua angka (pagu, realisasi_lalu, realisasi_ini, realisasi_total, sisa) berupa number murni tanpa koma/titik pemisah ribuan.
+Pastikan semua angka berupa number murni tanpa koma/titik pemisah ribuan. Jika tidak ada item BMB/BDC/BDB di potongan ini, kembalikan [].
 
 Teks FA Detail:
-${rawText}`;
+${chunkText}`;
 
-    const content = await this.requestChat(
-      ai_endpoint,
-      ai_model,
-      ai_api_key,
-      [
-        { role: 'system', content: 'Anda mengembalikan output JSON array murni yang valid.' },
-        { role: 'user', content: prompt }
-      ],
-      0.1
-    );
+      const content = await this.requestChat(
+        ai_endpoint,
+        ai_model,
+        ai_api_key,
+        [
+          { role: 'system', content: 'Anda hanya mengembalikan JSON array murni yang valid tanpa markdown atau teks tambahan.' },
+          { role: 'user', content: prompt }
+        ],
+        0.1
+      );
 
-    const cleaned = content
-      .replace(/```json\s*/gi, '')
-      .replace(/```\s*/g, '')
-      .trim();
-
-    const parsed = JSON.parse(cleaned);
-    if (!Array.isArray(parsed)) {
-      throw new Error('Output AI bukan JSON array.');
+      const parsed = this.extractJsonArray(content);
+      const valid = parsed.filter(r => ['BMB', 'BDC', 'BDB'].includes(String(r.output_kode || '').toUpperCase()));
+      allRows.push(...valid);
     }
 
-    return parsed.filter(r => ['BMB', 'BDC', 'BDB'].includes(String(r.output_kode || '').toUpperCase()));
+    return allRows;
   },
 
   async parseNodin(rawText, settings) {

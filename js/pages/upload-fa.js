@@ -65,10 +65,11 @@ const UploadFaPage = {
       const fullText = await PdfParser.extractText(file);
       Loading.hide();
 
-      // Potong per bagian agar tidak melebihi context window jika PDF sangat panjang, atau kirim teks yang mengandung BMB/BDC/BDB
-      const lines = fullText.split('\n');
       Loading.show(`Memparsing anggaran BMB/BDC/BDB menggunakan ${settings.ai_model}...`);
-      const rows = await AiCaller.parseFaDetail(fullText, settings);
+      const rows = await AiCaller.parseFaDetail(fullText, settings, (batch, total) => {
+        const textEl = document.getElementById('db-loading-text');
+        if (textEl) textEl.textContent = `Memparsing bagian ${batch}/${total} menggunakan ${settings.ai_model}...`;
+      });
       Loading.hide();
 
       this.parsedRows = rows;
