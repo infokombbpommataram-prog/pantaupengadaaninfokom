@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pantau Pengadaan Infokom</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
+
+  <!-- Loading Overlay (Lock + Blur + Center Notif) -->
+  <div id="db-loading-overlay" class="loading-overlay hidden" aria-hidden="true">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p id="db-loading-text" class="text-sm font-semibold text-slate-700 mt-3">Menghubungkan ke database...</p>
+      <p class="text-xs text-slate-400 mt-1">Mohon tunggu sebentar</p>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-sm"></div>
+
+  <!-- Modal Container -->
+  <div id="modal-container" class="hidden fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div id="modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"></div>
+  </div>
+
+  <!-- App Layout -->
+  <div id="app-shell" class="min-h-screen flex">
+    <!-- Sidebar (hidden on login) -->
+    <aside id="sidebar" class="hidden w-64 bg-slate-900 text-slate-100 flex-col shrink-0 min-h-screen">
+      <div class="p-5 border-b border-slate-800">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow">PP</div>
+          <div>
+            <h1 class="font-bold text-sm leading-tight">Pantau Pengadaan</h1>
+            <p class="text-xs text-slate-400">Tim Infokom</p>
+          </div>
+        </div>
+      </div>
+
+      <nav id="sidebar-nav" class="flex-1 p-3 space-y-1 text-sm overflow-y-auto"></nav>
+
+      <div id="sidebar-user" class="p-4 border-t border-slate-800 bg-slate-950/40"></div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <!-- Topbar Mobile -->
+      <header id="mobile-topbar" class="hidden md:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+        <span class="font-bold text-slate-800 text-sm">Pantau Pengadaan Infokom</span>
+        <button id="mobile-menu-btn" class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-medium">Menu</button>
+      </header>
+
+      <main id="app" class="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto"></main>
+    </div>
+  </div>
+
+  <!-- Core Scripts (Urutan Penting) -->
+  <script src="js/config.js"></script>
+  <script src="js/utils/formatter.js"></script>
+  <script src="js/loading.js"></script>
+  <script src="js/utils/toast.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+
+  <!-- Feature Utils -->
+  <script src="js/utils/pdf-parser.js"></script>
+  <script src="js/utils/ai-caller.js"></script>
+  <script src="js/utils/insight.js"></script>
+  <script src="js/utils/input-cepat.js"></script>
+  <script src="js/utils/drive-upload.js"></script>
+  <script src="js/utils/drive-preview.js"></script>
+
+  <!-- Pages -->
+  <script src="js/pages/login.js"></script>
+  <script src="js/pages/dashboard.js"></script>
+  <script src="js/pages/ticket-list.js"></script>
+  <script src="js/pages/ticket-form.js"></script>
+  <script src="js/pages/ticket-detail.js"></script>
+  <script src="js/pages/anggaran.js"></script>
+  <script src="js/pages/upload-fa.js"></script>
+  <script src="js/pages/harga-ref.js"></script>
+  <script src="js/pages/ai-settings.js"></script>
+  <script src="js/pages/users.js"></script>
+
+  <!-- Main Router -->
+  <script src="js/app.js"></script>
+</body>
+</html>
