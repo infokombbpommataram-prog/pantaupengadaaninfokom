@@ -195,6 +195,7 @@ const AiCaller = {
 
     const chunks = [];
     let pos = 0;
+    let activeSubOutput = '';
     let activeKomponen = '';
     let activeSubkomponen = '';
 
@@ -214,12 +215,16 @@ const AiCaller = {
 
       const chunkBody = text.slice(pos, end).trim();
       const prefix = pos > 0
-        ? `[LANJUTAN OUTPUT ${section.outputKode}${activeKomponen ? ' | Komponen: ' + activeKomponen : ''}${activeSubkomponen ? ' | SubKomponen: ' + activeSubkomponen : ''}]\n`
+        ? `[LANJUTAN OUTPUT ${section.outputKode}${activeSubOutput ? ' | SubOutput: ' + activeSubOutput : ''}${activeKomponen ? ' | Komponen: ' + activeKomponen : ''}${activeSubkomponen ? ' | SubKomponen: ' + activeSubkomponen : ''}]\n`
         : '';
 
       chunks.push(prefix + chunkBody);
 
-      // Update konteks komponen/subkomponen terakhir di chunk ini untuk chunk berikutnya
+      // Update konteks SubOutput, Komponen, SubKomponen terakhir di chunk ini untuk chunk berikutnya
+      const subOutMatches = [...chunkBody.matchAll(/\b([A-Z]{3}\.\d{3})\b/g)];
+      if (subOutMatches.length > 0) {
+        activeSubOutput = subOutMatches[subOutMatches.length - 1][1];
+      }
       const subKompMatches = [...chunkBody.matchAll(/\b(\d{3}\.[0-9A-Z]{2})\b/g)];
       if (subKompMatches.length > 0) {
         activeSubkomponen = subKompMatches[subKompMatches.length - 1][1];
