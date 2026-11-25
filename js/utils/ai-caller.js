@@ -164,8 +164,8 @@ const AiCaller = {
       ? targetPages
       : [{ pageText: rawText.slice(0, 12000), lastOutput: '' }];
 
-    // Proses per 2 halaman agar tidak melebihi batas token input/output AI
-    const BATCH_SIZE = 2;
+    // Proses per 1 halaman agar cepat dan tidak terkena timeout 100 detik (HTTP 524) dari Cloudflare Tunnel
+    const BATCH_SIZE = 1;
     const allRows = [];
     const totalBatches = Math.ceil(pagesToProcess.length / BATCH_SIZE);
 
@@ -174,43 +174,33 @@ const AiCaller = {
       const slice = pagesToProcess.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
       const chunkText = slice.map(s => s.pageText).join('\n\n');
 
-      const prompt = `Kamu adalah parser laporan keuangan pemerintah Indonesia (FA Detail SAKTI).
-Dari teks laporan berikut, ekstrak HANYA baris item/akun yang berada di bawah output dengan kode BMB, BDC, atau BDB. Abaikan output lain (seperti AEA, BAH, BKB, dll).
-Jika pada halaman ini ada item yang merupakan lanjutan dari output BMB/BDC/BDB di halaman sebelumnya, tetap ekstrak dengan output_kode yang sesuai.
+      const prompt = `Ekstrak data anggaran FA Detail SAKTI berikut HANYA untuk output kode BMB, BDC, atau BDB (abaikan kode output lain).
+Jika halaman ini lanjutan dari output BMB/BDC/BDB, tetap ekstrak.
+Kembalikan HANYA JSON array murni (tanpa teks lain):
+[{"mak_full":"3165.BDB.001.052.C.521211","output_kode":"BDB","output":"BDB.001","komponen":"052","subkomponen":"052.C","akun_kode":"521211","akun_nama":"Belanja Bahan","item_no":"000039","item_nama":"Spanduk","pagu":175000,"realisasi_lalu":0,"realisasi_ini":0,"realisasi_total":0,"sisa":175000}]
+Jika tidak ada item BMB/BDC/BDB, kembalikan [].
 
-Kembalikan HANYA JSON array valid tanpa teks penjelasan apapun, dengan format setiap objek:
-{
-  "mak_full": "3165.BDB.001.052.C.521211",
-  "output_kode": "BDB",
-  "output": "BDB.001",
-  "komponen": "052",
-  "subkomponen": "052.C",
-  "akun_kode": "521211",
-  "akun_nama": "Belanja Bahan",
-  "item_no": "000039",
-  "item_nama": "Spanduk",
-  "pagu": 175000,
-  "realisasi_lalu": 0,
-  "realisasi_ini": 0,
-  "realisasi_total": 0,
-  "sisa": 175000
-}
-
-Pastikan semua angka berupa number murni tanpa koma/titik pemisah ribuan. Jika tidak ada item BMB/BDC/BDB di potongan ini, kembalikan [].
-
-Teks FA Detail:
+Teks:
 ${chunkText}`;
 
-      const content = await this.requestChat(
-        ai_endpoint,
-        ai_model,
-        ai_api_key,
-        [
-          { role: 'system', content: 'Anda hanya mengembalikan JSON array murni yang valid tanpa markdown atau teks tambahan.' },
-          { role: 'user', content: prompt }
-        ],
-        0.1
-      );
+      let content = '';
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          content = await this.requestChat(
+            ai_endpoint,
+            ai_model,
+            ai_api_key,
+            [
+              { role: 'system', content: 'Return valid JSON array only.' },
+              { role: 'user', content: prompt }
+            ],
+            0.1
+          );
+          break;
+        } catch (err) {
+          if (attempt === 2) throw err;
+        }
+      }
 
       const parsed = this.extractJsonArray(content);
       const valid = parsed.filter(r => ['BMB', 'BDC', 'BDB'].includes(String(r.output_kode || '').toUpperCase()));
