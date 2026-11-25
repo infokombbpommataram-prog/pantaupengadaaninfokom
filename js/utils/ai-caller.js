@@ -1,5 +1,5 @@
 /**
- * ai-caller.js - Panggil AI Endpoint (9Router / OpenAI-Compatible / Gemini)
+ * ai-caller.js - Panggil AI Endpoint (9Router / OpenRouter / Gemini / OpenAI-Compatible)
  */
 
 const AiCaller = {
@@ -11,11 +11,61 @@ const AiCaller = {
     return u;
   },
 
-  async testConnection(endpoint, model, apiKey) {
+  /**
+   * Parse respons JSON biasa maupun SSE / NDJSON (jika provider/9Router tetap mengirim chunk streaming)
+   */
+  extractContentFromResponse(rawText) {
+    const trimmed = String(rawText || '').trim();
+    if (!trimmed) throw new Error('Respons AI kosong.');
+
+    // 1. Coba parse sebagai JSON standar
+    try {
+      const obj = JSON.parse(trimmed);
+      return obj.choices?.[0]?.message?.content || obj.choices?.[0]?.text || '';
+    } catch (_) {
+      // Lanjut ke parser SSE / multi-line JSON
+    }
+
+    // 2. Parse format SSE ("data: {...}") atau NDJSON
+    let combined = '';
+    const lines = trimmed.split(/\r?\n/);
+    for (const line of lines) {
+      let clean = line.trim();
+      if (!clean || clean === 'data: [DONE]' || clean === '[DONE]') continue;
+      if (clean.startsWith('data:')) {
+        clean = clean.slice(5).trim();
+      }
+      if (!clean.startsWith('{')) continue;
+      try {
+        const chunk = JSON.parse(clean);
+        const piece =
+          chunk.choices?.[0]?.delta?.content ??
+          chunk.choices?.[0]?.message?.content ??
+          chunk.choices?.[0]?.text ??
+          '';
+        if (piece) combined += piece;
+      } catch (_) {
+        // Abaikan baris yang bukan JSON valid
+      }
+    }
+
+    if (combined) return combined;
+    throw new Error('Format respons AI tidak dikenali: ' + trimmed.slice(0, 200));
+  },
+
+  async requestChat(endpoint, model, apiKey, messages, temperature = 0.1, maxTokens = undefined) {
     const url = this.normalizeEndpoint(endpoint);
     if (!url || !model || !apiKey) {
       throw new Error('Endpoint, Model, dan API Key wajib diisi.');
     }
+
+    const bodyObj = {
+      model,
+      messages,
+      stream: false,
+      temperature
+    };
+    if (maxTokens) bodyObj.max_tokens = maxTokens;
 
     const res = await fetch(url, {
       method: 'POST',
@@ -23,20 +73,27 @@ const AiCaller = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: 'user', content: 'Balas hanya dengan kata: OK' }],
-        max_tokens: 10
-      })
+      body: JSON.stringify(bodyObj)
     });
 
+    const rawText = await res.text();
     if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errText.slice(0, 250)}`);
+      throw new Error(`HTTP ${res.status}: ${rawText.slice(0, 250)}`);
     }
 
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || 'OK';
+    return this.extractContentFromResponse(rawText);
+  },
+
+  async testConnection(endpoint, model, apiKey) {
+    const reply = await this.requestChat(
+      endpoint,
+      model,
+      apiKey,
+      [{ role: 'user', content: 'Balas hanya dengan kata: OK' }],
+      0.1,
+      20
+    );
+    return reply || 'OK';
   },
 
   async parseFaDetail(rawText, settings) {
@@ -44,7 +101,6 @@ const AiCaller = {
     if (!ai_endpoint || !ai_model || !ai_api_key) {
       throw new Error('Pengaturan AI (Endpoint, Model, API Key) belum lengkap. Atur di menu Pengaturan AI & Drive.');
     }
-    const endpointUrl = this.normalizeEndpoint(ai_endpoint);
 
     const prompt = `Kamu adalah parser laporan keuangan pemerintah Indonesia (FA Detail SAKTI).
 Dari teks laporan berikut, ekstrak HANYA baris item/akun yang berada di bawah output dengan kode BMB, BDC, atau BDB. Abaikan output lain (seperti AEA, BAH, dll).
@@ -72,34 +128,17 @@ Pastikan semua angka (pagu, realisasi_lalu, realisasi_ini, realisasi_total, sisa
 Teks FA Detail:
 ${rawText}`;
 
-    const res = await fetch(endpointUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${ai_api_key}`
-      },
-      body: JSON.stringify({
-        model: ai_model,
-        messages: [
-          { role: 'system', content: 'Anda mengembalikan output JSON array murni yang valid.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.1
-      })
-    });
+    const content = await this.requestChat(
+      ai_endpoint,
+      ai_model,
+      ai_api_key,
+      [
+        { role: 'system', content: 'Anda mengembalikan output JSON array murni yang valid.' },
+        { role: 'user', content: prompt }
+      ],
+      0.1
+    );
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`AI API Error (${res.status}): ${errText.slice(0, 250)}`);
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    if (!content) {
-      throw new Error('Respons AI kosong.');
-    }
-
-    // Bersihkan markdown code fence jika AI menyertakan ```json
     const cleaned = content
       .replace(/```json\s*/gi, '')
       .replace(/```\s*/g, '')
@@ -110,7 +149,6 @@ ${rawText}`;
       throw new Error('Output AI bukan JSON array.');
     }
 
-    // Filter ulang hanya BMB, BDC, BDB untuk memastikan kepatuhan
     return parsed.filter(r => ['BMB', 'BDC', 'BDB'].includes(String(r.output_kode || '').toUpperCase()));
   },
 
@@ -120,7 +158,6 @@ ${rawText}`;
       throw new Error('Pengaturan AI belum lengkap.');
     }
 
-    const endpointUrl = this.normalizeEndpoint(ai_endpoint);
     const prompt = `Ekstrak informasi Nota Dinas Permintaan Pengadaan berikut menjadi JSON objek valid tanpa markdown:
 {
   "nodin_nomor": "...",
@@ -142,30 +179,19 @@ ${rawText}`;
 Teks Nota Dinas:
 ${rawText}`;
 
-    const res = await fetch(endpointUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${ai_api_key}`
-      },
-      body: JSON.stringify({
-        model: ai_model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1
-      })
-    });
+    const content = await this.requestChat(
+      ai_endpoint,
+      ai_model,
+      ai_api_key,
+      [{ role: 'user', content: prompt }],
+      0.1
+    );
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`AI API Error (${res.status}): ${errText.slice(0, 200)}`);
-    }
-
-    const data = await res.json();
-    const content = (data.choices?.[0]?.message?.content || '')
+    const cleaned = content
       .replace(/```json\s*/gi, '')
       .replace(/```\s*/g, '')
       .trim();
 
-    return JSON.parse(content);
+    return JSON.parse(cleaned);
   }
 };
