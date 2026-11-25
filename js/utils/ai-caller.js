@@ -3,11 +3,48 @@
  */
 
 const AiCaller = {
+  normalizeEndpoint(url) {
+    let u = String(url || '').trim().replace(/\/+$/, '');
+    if (u.endsWith('/v1')) {
+      u += '/chat/completions';
+    }
+    return u;
+  },
+
+  async testConnection(endpoint, model, apiKey) {
+    const url = this.normalizeEndpoint(endpoint);
+    if (!url || !model || !apiKey) {
+      throw new Error('Endpoint, Model, dan API Key wajib diisi.');
+    }
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [{ role: 'user', content: 'Balas hanya dengan kata: OK' }],
+        max_tokens: 10
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`HTTP ${res.status}: ${errText.slice(0, 250)}`);
+    }
+
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || 'OK';
+  },
+
   async parseFaDetail(rawText, settings) {
     const { ai_endpoint, ai_model, ai_api_key } = settings;
     if (!ai_endpoint || !ai_model || !ai_api_key) {
       throw new Error('Pengaturan AI (Endpoint, Model, API Key) belum lengkap. Atur di menu Pengaturan AI & Drive.');
     }
+    const endpointUrl = this.normalizeEndpoint(ai_endpoint);
 
     const prompt = `Kamu adalah parser laporan keuangan pemerintah Indonesia (FA Detail SAKTI).
 Dari teks laporan berikut, ekstrak HANYA baris item/akun yang berada di bawah output dengan kode BMB, BDC, atau BDB. Abaikan output lain (seperti AEA, BAH, dll).
@@ -35,7 +72,7 @@ Pastikan semua angka (pagu, realisasi_lalu, realisasi_ini, realisasi_total, sisa
 Teks FA Detail:
 ${rawText}`;
 
-    const res = await fetch(ai_endpoint, {
+    const res = await fetch(endpointUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -83,6 +120,7 @@ ${rawText}`;
       throw new Error('Pengaturan AI belum lengkap.');
     }
 
+    const endpointUrl = this.normalizeEndpoint(ai_endpoint);
     const prompt = `Ekstrak informasi Nota Dinas Permintaan Pengadaan berikut menjadi JSON objek valid tanpa markdown:
 {
   "nodin_nomor": "...",
@@ -104,7 +142,7 @@ ${rawText}`;
 Teks Nota Dinas:
 ${rawText}`;
 
-    const res = await fetch(ai_endpoint, {
+    const res = await fetch(endpointUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -3,6 +3,8 @@
  */
 
 const AiSettingsPage = {
+  savedApiKey: '',
+
   async render(container) {
     container.innerHTML = `
       <div class="max-w-3xl mx-auto space-y-6">
@@ -86,6 +88,7 @@ const AiSettingsPage = {
 
       document.getElementById('ai-endpoint').value = aiRes.ai_endpoint || '';
       document.getElementById('ai-model').value = aiRes.ai_model || '';
+      this.savedApiKey = aiRes.ai_api_key || '';
       document.getElementById('ai-key-status').textContent = aiRes.ai_api_key
         ? `API Key tersimpan (${aiRes.ai_api_key.slice(0, 6)}••••)`
         : 'API Key belum diisi';
@@ -114,16 +117,19 @@ const AiSettingsPage = {
   },
 
   async testAi() {
+    const endpoint = document.getElementById('ai-endpoint').value.trim();
+    const model = document.getElementById('ai-model').value.trim();
+    const apiKey = document.getElementById('ai-key').value.trim() || this.savedApiKey;
+
     try {
-      const res = await API.post('test_ai', {
-        ai_endpoint: document.getElementById('ai-endpoint').value.trim(),
-        ai_model: document.getElementById('ai-model').value.trim(),
-        ai_api_key: document.getElementById('ai-key').value.trim()
-      }, 'Menghubungkan ke database... (Testing AI)');
+      Loading.show('Menghubungi AI endpoint dari browser...');
+      const reply = await AiCaller.testConnection(endpoint, model, apiKey);
+      Loading.hide();
       document.getElementById('ai-test-status').innerHTML =
-        `<span class="text-emerald-600 font-semibold">✅ Koneksi AI berhasil! (${Formatter.datetime(res.tested_at)})</span>`;
+        `<span class="text-emerald-600 font-semibold">✅ Koneksi AI berhasil! Balasan: "${Formatter.escapeHtml(reply)}"</span>`;
       Toast.success('Koneksi AI berhasil!');
     } catch (err) {
+      Loading.forceHide();
       document.getElementById('ai-test-status').innerHTML =
         `<span class="text-rose-600 font-semibold">❌ ${Formatter.escapeHtml(err.message)}</span>`;
       Toast.error(err.message);
