@@ -11,8 +11,8 @@ const UploadFaPage = {
       <div class="max-w-5xl mx-auto space-y-6">
         <div class="flex items-center justify-between">
           <div>
-            <h2 class="text-2xl font-bold text-slate-900">Upload & Parsing FA Detail (AI)</h2>
-            <p class="text-sm text-slate-500">Ekstrak otomatis pagu, realisasi, dan sisa khusus output <strong>BMB, BDC, dan BDB</strong></p>
+            <h2 class="text-2xl font-bold text-slate-900">Import / Upload FA Detail (PDF / Excel)</h2>
+            <p class="text-sm text-slate-500">Ekstrak otomatis pagu, realisasi, dan sisa khusus output <strong>BMB, BDC, dan BDB</strong> dari PDF atau Excel (.xlsx/.xls)</p>
           </div>
           <button onclick="App.navigate('anggaran')" class="px-3.5 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50">
             ← Kembali ke Anggaran
@@ -27,8 +27,8 @@ const UploadFaPage = {
                 class="w-full px-3.5 py-2 rounded-lg border border-slate-300 text-sm" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-600 mb-1">Pilih File PDF FA Detail (16 Segmen)</label>
-              <input id="fa-file-input" type="file" accept=".pdf"
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Pilih File FA Detail (.pdf, .xlsx, .xls)</label>
+              <input id="fa-file-input" type="file" accept=".pdf,.xlsx,.xls"
                 class="w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer" />
             </div>
           </div>
@@ -50,7 +50,7 @@ const UploadFaPage = {
     const fileInput = document.getElementById('fa-file-input');
     const file = fileInput?.files?.[0];
     if (!file) {
-      Toast.warning('Pilih file PDF FA Detail terlebih dahulu.');
+      Toast.warning('Pilih file PDF atau Excel (.xlsx/.xls) FA Detail terlebih dahulu.');
       return;
     }
 
@@ -61,8 +61,11 @@ const UploadFaPage = {
         return;
       }
 
-      Loading.show('Membaca teks dari PDF FA Detail...');
-      const fullText = await PdfParser.extractText(file);
+      const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+      Loading.show(isExcel ? 'Membaca data dari file Excel FA Detail...' : 'Membaca teks dari PDF FA Detail...');
+      const fullText = isExcel
+        ? await ExcelExport.readExcelAsText(file)
+        : await PdfParser.extractText(file);
       Loading.hide();
 
       Loading.show(`Memparsing anggaran BMB/BDC/BDB menggunakan ${settings.ai_model}...`);
