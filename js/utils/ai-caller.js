@@ -119,34 +119,39 @@ const AiCaller = {
     const pages = String(fullText || '').split(/--- HALAMAN \d+ ---/);
     const selected = [];
     let currentOutput = '';
+    let currentSubOutput = '';
 
     for (let i = 0; i < pages.length; i++) {
       const p = pages[i].trim();
       if (!p) continue;
 
-      // Cari semua kode SubOutput seperti "BDB.001", "BDC.001", "BMB.001", "BKB.001", "AEA.001"
-      const subOutputMatches = p.match(/\b([A-Z]{3})\.\d{3}\b/g) || [];
-      let pageHasTarget = false;
+      const startOutput = currentOutput;
+      const startSubOutput = currentSubOutput;
 
-      if (['BMB', 'BDC', 'BDB'].includes(currentOutput)) {
-        pageHasTarget = true;
-      }
+      // Cari semua kode SubOutput seperti "BDB.001", "BDC.001", "BMB.001", "BIA.001", "AEA.001"
+      const subOutputMatches = p.match(/\b([A-Z]{3})\.\d{3}\b/g) || [];
+      let pageHasTarget = ['BMB', 'BDC', 'BDB'].includes(startOutput);
 
       for (const m of subOutputMatches) {
         const code = m.slice(0, 3);
         currentOutput = code;
+        currentSubOutput = m;
         if (['BMB', 'BDC', 'BDB'].includes(code)) {
           pageHasTarget = true;
         }
       }
 
-      // Fallback jika hanya ada kode 3 huruf berdiri sendiri
       if (!pageHasTarget && /\b(BMB|BDC|BDB)\b/.test(p)) {
+        const m = p.match(/\b(BMB|BDC|BDB)\b/);
+        if (m) currentOutput = m[1];
         pageHasTarget = true;
       }
 
       if (pageHasTarget) {
-        selected.push({ pageText: p, lastOutput: currentOutput });
+        const contextHeader = ['BMB', 'BDC', 'BDB'].includes(startOutput)
+          ? `[KONTEKS HALAMAN: Baris-baris awal sebelum kode output baru merupakan lanjutan dari Output ${startOutput}${startSubOutput ? ' (' + startSubOutput + ')' : ''}.]\n`
+          : '';
+        selected.push({ pageText: contextHeader + p, lastOutput: currentOutput });
       }
     }
 
